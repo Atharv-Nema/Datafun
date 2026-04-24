@@ -1,0 +1,4 @@
+(library
+ (name datafun_lib)
+ (modules ast alpha type_checker frontend codegen)
+ (libraries menhirLib))
