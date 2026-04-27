@@ -1,0 +1,4 @@
+let [seeds] = [{0}] in
+fix (reach : set int) ->
+  seeds V (for x in reach do
+    if(x < 5, {x + 1}, (bot : set int)))

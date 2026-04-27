@@ -1,0 +1,6 @@
+let [start] = [{(inl () : unit + unit)}] in
+fix (reach : set (unit + unit)) ->
+  start V (for node in reach do
+    case(node,
+      inl(a) -> {(inr () : unit + unit)},
+      inr(b) -> (bot : set (unit + unit))))

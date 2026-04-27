@@ -1,0 +1,2 @@
+let [s] = [{()} V {()}] in
+for x in s do {x}

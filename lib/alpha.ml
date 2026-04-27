@@ -15,11 +15,13 @@ let rec rename subst = function
     Lam { x = x'; a; e = rename ((x, x') :: subst) e }
   | App { e1; e2 } ->
     App { e1 = rename subst e1; e2 = rename subst e2 }
+  | Lit _ as e -> e
+  | BinOp { op; e1; e2 } -> BinOp { op; e1 = rename subst e1; e2 = rename subst e2 }
   | Unit -> Unit
   | Pair { e1; e2 } ->
     Pair { e1 = rename subst e1; e2 = rename subst e2 }
-  | Pil e -> Pil (rename subst e)
-  | Pir e -> Pir (rename subst e)
+  | ProjL e -> ProjL (rename subst e)
+  | ProjR e -> ProjR (rename subst e)
   | Inl { e; t } -> Inl { e = rename subst e; t }
   | Inr { e; t } -> Inr { e = rename subst e; t }
   | Case { e; x; e1; y; e2 } ->
@@ -30,8 +32,8 @@ let rec rename subst = function
            y  = y';
            e2 = rename ((y, y') :: subst) e2 }
   | Bot l -> Bot l
-  | Join { l; e1; e2 } ->
-    Join { l; e1 = rename subst e1; e2 = rename subst e2 }
+  | Join { e1; e2 } ->
+    Join { e1 = rename subst e1; e2 = rename subst e2 }
   | For { e1; x; e2 } ->
     (* for(e1).x∈e2: x is bound in e1 (body), e2 (set) is outside scope *)
     let x' = fresh x in

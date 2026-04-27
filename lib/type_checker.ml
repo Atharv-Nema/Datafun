@@ -27,6 +27,7 @@ let rec lattice_to_typ = function
 
 let rec fin_to_typ = function
   | FUnit          -> TUnit
+  | FInt           -> TInt
   | FProd (t1, t2) -> TProd (fin_to_typ t1, fin_to_typ t2)
   | FSum  (t1, t2) -> TSum  (fin_to_typ t1, fin_to_typ t2)
   | FPow t         -> TPow t
@@ -34,6 +35,7 @@ let rec fin_to_typ = function
 
 let rec typ_to_fin = function
   | TUnit          -> Some FUnit
+  | TInt           -> Some FInt
   | TProd (a, b)   ->
     (match typ_to_fin a, typ_to_fin b with
      | Some t1, Some t2 -> Some (FProd (t1, t2))
@@ -65,6 +67,16 @@ let rec synth (ctx : ctx) = function
      | Some a -> a
      | None   -> fail "unbound variable: %s" x)
 
+  | Lit _ -> TInt
+
+  | BinOp { op; e1; e2 } ->
+    (match synth ctx e1, synth ctx e2 with
+     | TInt, TInt ->
+       (match op with
+        | Add | Sub | Mul | Div -> TInt
+        | Eq | Lt | Le -> TSum (TUnit, TUnit))
+     | _ -> fail "arithmetic: operands must have type int")
+
   | Unit ->
     (* 1I *)
     TUnit
@@ -87,13 +99,13 @@ let rec synth (ctx : ctx) = function
     (* ×I *)
     TProd (synth ctx e1, synth ctx e2)
 
-  | Pil e ->
+  | ProjL e ->
     (* ×E left *)
     (match synth ctx e with
      | TProd (a, _) -> a
      | _ -> fail "π₁: expected a product type")
 
-  | Pir e ->
+  | ProjR e ->
     (* ×E right *)
     (match synth ctx e with
      | TProd (_, b) -> b
@@ -149,12 +161,11 @@ let rec synth (ctx : ctx) = function
      | Some t -> TPow t
      | None   -> fail "singleton: element type must be a finite type")
 
-  | Join { l; e1; e2 } ->
-    (* T∨: Γ ⊢ e1:L  Γ ⊢ e2:L  →  Γ ⊢ e1 ∨_L e2 : L *)
-    let lt = lattice_to_typ l in
+  | Join { e1; e2 } ->
+    (* T∨: Γ ⊢ e1:L  Γ ⊢ e2:L  →  Γ ⊢ e1 ∨ e2 : L *)
     let t1 = synth ctx e1 and t2 = synth ctx e2 in
-    if t1 = lt && t2 = lt then lt
-    else fail "join: operands must have the expected lattice type"
+    if t1 = t2 then t1
+    else fail "join: operands must have the same lattice type"
 
   | For { e1; x; e2 } ->
     (* Tchoose: Γ ⊢ e2:𝒫(T)  Γ,x:ᴰT ⊢ e1:L  →  Γ ⊢ for(e1).x∈e2 : L *)
@@ -173,3 +184,8 @@ let rec synth (ctx : ctx) = function
     let t = synth (extend x Ord lt (restrict ctx)) e in
     if t = lt then lt
     else fail "fix: body type must match the declared lattice type"
+
+let typecheck e =
+  match synth [] e with
+  | TFun _ -> raise (TypeError "top-level expression cannot have a function type")
+  | _ -> ()

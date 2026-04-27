@@ -1,4 +1,8 @@
 (library
  (name datafun_lib)
- (modules ast alpha type_checker frontend codegen)
- (libraries menhirLib))
+ (modules ast alpha type_checker runtime frontend codegen lexer parser)
+ (libraries menhirLib)
+ (flags (:standard -warn-error -8)))
+
+(ocamllex lexer)
+(menhir (modules parser))
