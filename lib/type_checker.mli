@@ -1,11 +1,12 @@
 open Ast
 
-(** Variable qualifier: Disc for discrete (modal/box-safe), Ord for ordinary. *)
+(** Variable qualifier: Disc for discrete, Ord for ordinary. *)
 type qualifier = Disc | Ord
 
 (** Typing context: ordered list of (variable, qualifier, type) bindings. *)
 type ctx = (var * qualifier * typ) list
 
+(* CR: Source span information as an extension *)
 (** Structured type errors returned by [synth]. *)
 type error =
   | UnboundVar        of var

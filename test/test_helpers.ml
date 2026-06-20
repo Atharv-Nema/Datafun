@@ -2,7 +2,6 @@ open Datafun_lib
 open Ast
 open Type_checker
 open Pretty
-open Alpha
 
 let show_fin_opt = function
   | None   -> "None"
@@ -139,46 +138,42 @@ let%expect_test "lattice_to_typ: power set" =
   print_string (show_typ (lattice_to_typ (LPow FInt)));
   [%expect {| set int |}]
 
-(* --- alpha_rename --- *)
-(* Alpha-rename resets the counter each call; we check structural shape not names. *)
+(* --- Alpha.rename ---
+   We use [create_counter] to get a counter starting at 0, giving deterministic
+   fresh names of the form "base_N". *)
 
-let is_fresh_of base name =
-  (* fresh names have the form "base_N" for some non-negative integer N *)
-  let prefix = base ^ "_" in
-  String.length name > String.length prefix
-  && String.sub name 0 (String.length prefix) = prefix
-
-let%expect_test "alpha_rename: variable not renamed" =
-  (* Free variables are not renamed *)
-  let e = alpha_rename (Var "x") in
-  print_string (show_expr e);
+let%expect_test "rename: free variable is not renamed" =
+  let c = Alpha.create_counter () in
+  print_string (show_expr (Alpha.rename c [] (Var "x")));
   [%expect {| (Var x) |}]
 
-let%expect_test "alpha_rename: lambda binder is freshened" =
-  let e = alpha_rename (Lam { x = "x"; a = TInt; e = Var "x" }) in
-  (match e with
-   | Lam { x; e = Var y; _ } ->
-     Printf.printf "binder_fresh=%b same_in_body=%b"
-       (is_fresh_of "x" x) (x = y)
-   | _ -> print_string "unexpected shape");
-  [%expect {| binder_fresh=true same_in_body=true |}]
+let%expect_test "rename: lambda binder is freshened and body updated" =
+  let c = Alpha.create_counter () in
+  let e = Alpha.rename c [] (Lam { x = "x"; a = TInt; e = Var "x" }) in
+  print_string (show_expr e);
+  [%expect {| (Lam x_0 : int . (Var x_0)) |}]
 
-let%expect_test "alpha_rename: shadowing — inner binder gets distinct name" =
-  (* fun (x:int) -> fun (x:int) -> x  — inner x should shadow outer *)
-  let e = alpha_rename
+let%expect_test "rename: shadowing gives distinct fresh names" =
+  (* fun (x:int) -> fun (x:int) -> x  — outer gets x_0, inner gets x_1 *)
+  let c = Alpha.create_counter () in
+  let e = Alpha.rename c []
     (Lam { x = "x"; a = TInt;
            e = Lam { x = "x"; a = TInt; e = Var "x" } }) in
-  (match e with
-   | Lam { x = x1; e = Lam { x = x2; e = Var y; _ }; _ } ->
-     Printf.printf "outer_fresh=%b inner_fresh=%b distinct=%b body_matches_inner=%b"
-       (is_fresh_of "x" x1) (is_fresh_of "x" x2) (x1 <> x2) (y = x2)
-   | _ -> print_string "unexpected shape");
-  [%expect {| outer_fresh=true inner_fresh=true distinct=true body_matches_inner=true |}]
+  print_string (show_expr e);
+  [%expect {| (Lam x_0 : int . (Lam x_1 : int . (Var x_1))) |}]
 
-let%expect_test "alpha_rename: free variable in lambda body is unchanged" =
-  (* fun (x:int) -> y  — y is free, must not be renamed *)
-  let e = alpha_rename (Lam { x = "x"; a = TInt; e = Var "y" }) in
-  (match e with
-   | Lam { e = Var y; _ } -> print_string y
-   | _ -> print_string "unexpected shape");
-  [%expect {| y |}]
+let%expect_test "rename: free variable in body is unchanged" =
+  let c = Alpha.create_counter () in
+  let e = Alpha.rename c [] (Lam { x = "x"; a = TInt; e = Var "y" }) in
+  print_string (show_expr e);
+  [%expect {| (Lam x_0 : int . (Var y)) |}]
+
+let%expect_test "rename: counter shared across subexpressions" =
+  (* Pair of two lambdas — binders in left and right get consecutive counters *)
+  let c = Alpha.create_counter () in
+  let e = Alpha.rename c []
+    (Pair { e1 = Lam { x = "x"; a = TInt; e = Var "x" };
+            e2 = Lam { x = "x"; a = TInt; e = Var "x" } }) in
+  print_string (show_expr e);
+  (* OCaml evaluates record fields right-to-left, so e2 gets counter 0, e1 gets 1 *)
+  [%expect {| (Pair (Lam x_1 : int . (Var x_1)) (Lam x_0 : int . (Var x_0))) |}]
