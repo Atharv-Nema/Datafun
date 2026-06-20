@@ -7,26 +7,24 @@ let () =
     die "Usage: datafun <program.df>";
   let df_file = Sys.argv.(1) in
 
-  (* Parse *)
   let ic = open_in df_file in
   let expr =
     Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
-      try Frontend.parse_channel ic
-      with Frontend.ParseError s -> die "%s" s)
+      match Frontend.parse_channel ic with
+      | Ok e    -> e
+      | Error s -> die "%s" s)
   in
 
-  (* Alpha-rename and compile to OCaml source *)
   let expr = Alpha.alpha_rename expr in
   let src =
-    try Codegen.compile_program expr
-    with Type_checker.TypeError s -> die "Type error: %s" s
+    match Codegen.compile_program expr with
+    | Ok s      -> s
+    | Error err -> die "Type error: %s" (Type_checker.show_error err)
   in
 
-  (* Write generated source to a temp file *)
   let tmp = Filename.temp_file "datafun_" ".ml" in
   (let oc = open_out tmp in output_string oc src; close_out oc);
 
-  (* Compile against the library in the dune build tree *)
   let lib = "_build/default/lib" in
   let cmi = lib ^ "/.datafun_lib.objs/byte" in
   let exe = Filename.remove_extension (Filename.basename df_file) in

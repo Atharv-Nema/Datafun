@@ -1,6 +1,12 @@
 open Ast
 open Type_checker
 
+(* Post-typecheck: synth cannot fail on a well-typed expression. *)
+let synth_exn ctx e =
+  match synth ctx e with
+  | Ok t    -> t
+  | Error _ -> assert false
+
 (* Convert AST types from OCaml types to strings representing those types (for the runtime) *)
 let rec compile_fin = function
   | FUnit          -> "FUnit"
@@ -56,10 +62,9 @@ let rec compile (ctx : ctx) : expr -> string = function
   | Inr { e; _ } -> Printf.sprintf "(VInr (%s))" (compile ctx e)
 
   | Case { e; x; e1; y; e2 } ->
-    (* Synthesize scrutinee type to know what x and y are bound to. *)
-    let t1, t2 = match synth ctx e with
+    let t1, t2 = match synth_exn ctx e with
       | TSum (a, b) -> (a, b)
-      | _ -> failwith "codegen: case expects sum type"
+      | _ -> assert false
     in
     Printf.sprintf "(case (%s) (VFunc (fun %s -> %s)) (VFunc (fun %s -> %s)))"
       (compile ctx e) x (compile (extend x Ord t1 ctx) e1) y (compile (extend y Ord t2 ctx) e2)
@@ -74,15 +79,14 @@ let rec compile (ctx : ctx) : expr -> string = function
     Printf.sprintf "(sing (%s))" (compile ctx e)
 
   | For { e1; x; e2 } ->
-    (* The AST doesn't carry the body lattice, so we recover it via synth. *)
-    let t = match synth ctx e2 with
+    let t = match synth_exn ctx e2 with
       | TPow t -> t
-      | _ -> failwith "codegen: for set expects power type"
+      | _      -> assert false
     in
     let ctx' = extend x Disc (fin_to_typ t) ctx in
-    let l = match typ_to_lattice (synth ctx' e1) with
+    let l = match typ_to_lattice (synth_exn ctx' e1) with
       | Some l -> l
-      | None   -> failwith "codegen: for body must be a lattice type"
+      | None   -> assert false
     in
     Printf.sprintf "(for_set (%s) (%s) (VFunc (fun %s -> %s)))"
       (compile_lattice l) (compile ctx e2) x (compile ctx' e1)
@@ -90,9 +94,9 @@ let rec compile (ctx : ctx) : expr -> string = function
   | Box e -> compile (restrict ctx) e
 
   | LetBox { x; e1; e2 } ->
-    let a = match synth ctx e1 with
+    let a = match synth_exn ctx e1 with
       | TBox a -> a
-      | _ -> failwith "codegen: let[] expects box type"
+      | _      -> assert false
     in
     Printf.sprintf "apply (VFunc (fun %s -> (%s))) (%s)"
       x (compile (extend x Disc a ctx) e2) (compile ctx e1)
@@ -106,8 +110,10 @@ let rec compile (ctx : ctx) : expr -> string = function
 
 let header = "open Datafun_lib\nopen Ast\nopen Runtime\nopen Value\n\n"
 
-let compile_program (e : expr) : string =
-  typecheck e;
-  header
-  ^ "let result =\n  " ^ compile empty e ^ "\n\n"
-  ^ "let () = print_endline (value_to_string result)\n"
+let compile_program (e : expr) : (string, Type_checker.error) result =
+  match Type_checker.synth empty e with
+  | Error _ as err -> err
+  | Ok _ ->
+    Ok (header
+        ^ "let result =\n  " ^ compile empty e ^ "\n\n"
+        ^ "let () = print_endline (value_to_string result)\n")
