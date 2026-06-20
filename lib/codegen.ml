@@ -7,7 +7,6 @@ let synth_exn ctx e =
   | Ok t    -> t
   | Error _ -> assert false
 
-(* Convert AST types from OCaml types to strings representing those types (for the runtime) *)
 let rec compile_fin = function
   | FUnit          -> "FUnit"
   | FInt           -> "FInt"
@@ -21,8 +20,6 @@ let rec compile_lattice = function
   | LProd (l1, l2) -> Printf.sprintf "(LProd (%s, %s))" (compile_lattice l1) (compile_lattice l2)
   | LPow t         -> Printf.sprintf "(LPow (%s))" (compile_fin t)
 
-(* Compile a Datafun expression to an OCaml expression string.
-   ctx is the typing context, used to recover types where the AST omits them. *)
 let compile_op = function
   | Add -> "Add" | Sub -> "Sub" | Mul -> "Mul" | Div -> "Div"
   | Eq  -> "Eq"  | Lt  -> "Lt"  | Le  -> "Le"
@@ -33,28 +30,28 @@ let rec compile (ctx : ctx) : expr -> string = function
   | Lit n -> Printf.sprintf "(VInt %d)" n
 
   | BinOp { op; e1; e2 } ->
-    Printf.sprintf "(arith %s (%s) (%s))"
+    Printf.sprintf "(arith %s %s %s)"
       (compile_op op) (compile ctx e1) (compile ctx e2)
 
   | Unit -> "VUnit"
 
   | Lam { x; a; e } ->
-    Printf.sprintf "(VFunc (fun %s -> %s))"
+    Printf.sprintf "(fun %s -> %s)"
       x (compile (extend x Ord a ctx) e)
 
   | App { e1; e2 } ->
-    Printf.sprintf "apply (%s) (%s)"
+    Printf.sprintf "((%s) (%s))"
       (compile ctx e1) (compile ctx e2)
 
   | Pair { e1; e2 } ->
     Printf.sprintf "(VPair (%s, %s))" (compile ctx e1) (compile ctx e2)
 
   | ProjL e ->
-    Printf.sprintf "(projl (%s))"
+    Printf.sprintf "(match (%s) with VPair (l_, _) -> l_ | _ -> assert false)"
       (compile ctx e)
 
   | ProjR e ->
-    Printf.sprintf "(projr (%s))"
+    Printf.sprintf "(match (%s) with VPair (_, r_) -> r_ | _ -> assert false)"
       (compile ctx e)
 
   | Inl { e; _ } -> Printf.sprintf "(VInl (%s))" (compile ctx e)
@@ -66,17 +63,19 @@ let rec compile (ctx : ctx) : expr -> string = function
       | TSum (a, b) -> (a, b)
       | _ -> assert false
     in
-    Printf.sprintf "(case (%s) (VFunc (fun %s -> %s)) (VFunc (fun %s -> %s)))"
-      (compile ctx e) x (compile (extend x Ord t1 ctx) e1) y (compile (extend y Ord t2 ctx) e2)
+    Printf.sprintf "(match (%s) with VInl %s -> (%s) | VInr %s -> (%s) | _ -> assert false)"
+      (compile ctx e)
+      x (compile (extend x Ord t1 ctx) e1)
+      y (compile (extend y Ord t2 ctx) e2)
 
   | Bot l ->
-    Printf.sprintf "(bot (%s))" (compile_lattice l)
+    Printf.sprintf "(bot %s)" (compile_lattice l)
 
-  | Join { e1; e2} ->
-    Printf.sprintf "(join (%s) (%s))" (compile ctx e1) (compile ctx e2)
+  | Join { e1; e2 } ->
+    Printf.sprintf "(join %s %s)" (compile ctx e1) (compile ctx e2)
 
   | Sing e ->
-    Printf.sprintf "(sing (%s))" (compile ctx e)
+    Printf.sprintf "(sing %s)" (compile ctx e)
 
   | For { e1; x; e2 } ->
     let t = match synth_exn ctx e2 with
@@ -88,7 +87,7 @@ let rec compile (ctx : ctx) : expr -> string = function
       | Some l -> l
       | None   -> assert false
     in
-    Printf.sprintf "(for_set (%s) (%s) (VFunc (fun %s -> %s)))"
+    Printf.sprintf "(for_set %s %s (fun %s -> %s))"
       (compile_lattice l) (compile ctx e2) x (compile ctx' e1)
 
   | Box e -> compile (restrict ctx) e
@@ -98,14 +97,13 @@ let rec compile (ctx : ctx) : expr -> string = function
       | TBox a -> a
       | _      -> assert false
     in
-    Printf.sprintf "apply (VFunc (fun %s -> (%s))) (%s)"
-      x (compile (extend x Disc a ctx) e2) (compile ctx e1)
+    Printf.sprintf "(let %s = %s in %s)"
+      x (compile ctx e1) (compile (extend x Disc a ctx) e2)
 
   | Fix { x; l; e } ->
-    Printf.sprintf "(fix (%s) (VFunc (fun %s -> %s)))"
+    Printf.sprintf "(fix %s (fun %s -> %s))"
       (compile_lattice l) x
       (compile (extend x Ord (lattice_to_typ l) (restrict ctx)) e)
-
 
 
 let header = "open Datafun_lib\nopen Ast\nopen Runtime\nopen Value\n\n"

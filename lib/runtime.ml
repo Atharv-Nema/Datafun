@@ -1,7 +1,5 @@
 open Ast
 
-(* Functions are OCaml-level; value covers only ground/set-element types. *)
-
 module rec Value : sig
   type t =
     | VUnit
@@ -10,7 +8,6 @@ module rec Value : sig
     | VInl  of t
     | VInr  of t
     | VSet  of VSet.t
-    | VFunc of (Value.t -> Value.t)
   val compare : t -> t -> int
 end = struct
   type t =
@@ -20,7 +17,6 @@ end = struct
     | VInl  of t
     | VInr  of t
     | VSet  of VSet.t
-    | VFunc of (Value.t -> Value.t)
   let rec compare a b =
     match a, b with
     | VUnit,          VUnit          -> 0
@@ -32,7 +28,7 @@ end = struct
     | VInl _,         VInr _         -> -1
     | VInr _,         VInl _         ->  1
     | VSet sa,        VSet sb        -> VSet.compare sa sb
-    | _ -> failwith "invalid comparison"
+    | _ -> assert false
 end
 and VSet : Set.S with type elt = Value.t = Set.Make(Value)
 type value = Value.t
@@ -48,7 +44,7 @@ let rec join (v1 : value) (v2 : value) : value =
   | VUnit,          VUnit          -> VUnit
   | VPair (a1, b1), VPair (a2, b2) -> VPair (join a1 a2, join b1 b2)
   | VSet s1,        VSet s2        -> VSet (VSet.union s1 s2)
-  | _ -> failwith "Runtime.join: type mismatch"
+  | _ -> assert false
 
 let sing (v : value) : value = VSet (VSet.singleton v)
 
@@ -63,29 +59,15 @@ let arith op (VInt a) (VInt b) = match op with
   | Lt  -> bool_val (a < b)
   | Le  -> bool_val (a <= b)
 
-(* Expressions are compiled down to sets and functions *)
-let for_set (l: lattice) (VSet v) (VFunc f): value =
-  VSet.fold (fun x acc -> join acc (f x)) v (bot l)
-  
-
-let apply (VFunc f) v = f v
-
-let projl (VPair (x, _)) = x
-
-let projr (VPair (_, x)) = x
-
-let case e (VFunc l) (VFunc r) = match e with
-| VInl x -> l x
-| VInr y -> r y
-| _ -> failwith "invalid case"
-
-(* Iterate x := x ∨ f(x) from ⊥_l until stable. *)
-let fix (l : lattice) (VFunc f) : value =
+let fix (l : lattice) (f : value -> value) : value =
   let rec loop x =
-    let x' = join x (f x) in
+    let x' = f x in
     if Value.compare x x' = 0 then x else loop x'
   in
   loop (bot l)
+
+let for_set (l : lattice) (VSet v) (f : value -> value) : value =
+  VSet.fold (fun x acc -> join acc (f x)) v (bot l)
 
 let rec value_to_string = function
   | VUnit          -> "()"
@@ -97,5 +79,3 @@ let rec value_to_string = function
       let elts = VSet.elements s in
       let content = String.concat ", " (List.map value_to_string elts) in
       "{" ^ content ^ "}"
-  | VFunc _ -> failwith "toplevel should not evaluate to a function"
-
