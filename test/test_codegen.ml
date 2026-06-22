@@ -5,6 +5,7 @@ open Codegen
 
 (* Compile an expression to its OCaml string representation. *)
 let cg ctx e = compile ctx e
+let dv ctx e = deriv ctx e
 
 (* Compile a top-level program and return the full generated source. *)
 let prog s =
@@ -107,35 +108,85 @@ let%expect_test "cg: singleton" =
 
 (* --- box / let-box --- *)
 
-let%expect_test "cg: box erases" =
-  (* Box just restricts the context; the expression itself is unchanged *)
+let%expect_test "cg: box is an OCaml tuple of value and deriv" =
   print_string (cg [("x", Disc, TInt)] (Box (Var "x")));
-  [%expect {| x |}]
+  [%expect {| (x, d_x) |}]
 
-let%expect_test "cg: let-box becomes let" =
-  (* Box (Lit 1) erases to (VInt 1); LetBox becomes let x = ... in ... *)
+let%expect_test "cg: let-box destructures the tuple" =
   let e = LetBox { x = "x"; e1 = Box (Lit 1); e2 = Var "x" } in
   print_string (cg [] e);
-  [%expect {| (let x = (VInt 1) in x) |}]
+  [%expect {| (let (x, d_x) = ((VInt 1), VUnit) in x) |}]
+
+let%expect_test "deriv: let-box destructures tuple and derivs body" =
+  let e = LetBox { x = "x"; e1 = Box (Lit 1); e2 = Var "x" } in
+  print_string (dv [] e);
+  [%expect {| (let (x, d_x) = ((VInt 1), VUnit) in d_x) |}]
 
 (* --- for --- *)
 
-let%expect_test "cg: for" =
+let%expect_test "cg: for binds d_x for nested box uses" =
   let e = For { e2 = Var "s"; x = "x"; e1 = Sing (Var "x") } in
   print_string (cg [("s", Ord, TPow FInt); ("x", Disc, TInt)] e);
-  [%expect {| (for_set (LPow (FInt)) s (fun x -> (sing x))) |}]
+  [%expect {| (for_set (LPow (FInt)) s (fun x -> let d_x = VUnit in (sing x))) |}]
 
 (* --- fix --- *)
 
-let%expect_test "cg: fix" =
+let%expect_test "cg: fix uses seminaive_fix" =
   let e = Fix { x = "x"; l = LUnit; e = Unit } in
   print_string (cg [] e);
-  [%expect {| (fix LUnit (fun x -> VUnit)) |}]
+  [%expect {| (seminaive_fix LUnit (fun x -> VUnit) (fun x d_x -> VUnit)) |}]
 
-let%expect_test "cg: fix over set" =
+let%expect_test "cg: fix over set uses seminaive_fix with deriv" =
   let e = Fix { x = "acc"; l = LPow FInt; e = Sing (Var "acc") } in
   print_string (cg [("acc", Ord, TPow FInt)] e);
-  [%expect {| (fix (LPow (FInt)) (fun acc -> (sing acc))) |}]
+  [%expect {| (seminaive_fix (LPow (FInt)) (fun acc -> (sing acc)) (fun acc d_acc -> (bot (LPow ((FPow (FInt))))))) |}]
+
+(* --- deriv --- *)
+
+let%expect_test "deriv: var" =
+  print_string (dv [("x", Ord, TInt)] (Var "x"));
+  [%expect {| d_x |}]
+
+let%expect_test "deriv: lit is VUnit" =
+  print_string (dv [] (Lit 42));
+  [%expect {| VUnit |}]
+
+let%expect_test "deriv: unit is VUnit" =
+  print_string (dv [] Unit);
+  [%expect {| VUnit |}]
+
+let%expect_test "deriv: binop is VUnit" =
+  print_string (dv [] (BinOp { op = Add; e1 = Lit 1; e2 = Lit 2 }));
+  [%expect {| VUnit |}]
+
+let%expect_test "deriv: pair is componentwise" =
+  print_string (dv [("x", Ord, TInt); ("y", Ord, TUnit)] (Pair { e1 = Var "x"; e2 = Var "y" }));
+  [%expect {| (VPair (d_x, d_y)) |}]
+
+let%expect_test "deriv: lam introduces d_x parameter" =
+  print_string (dv [] (Lam { x = "x"; a = TInt; e = Var "x" }));
+  [%expect {| (fun x -> fun d_x -> d_x) |}]
+
+let%expect_test "deriv: app applies chain rule" =
+  print_string (dv [("f", Disc, TFun (TInt, TInt)); ("x", Disc, TInt)]
+    (App { e1 = Var "f"; e2 = Var "x" }));
+  [%expect {| (((d_f) (x)) (d_x)) |}]
+
+let%expect_test "deriv: sing is bot" =
+  print_string (dv [("x", Disc, TInt)] (Sing (Var "x")));
+  [%expect {| (bot (LPow (FInt))) |}]
+
+let%expect_test "deriv: box is VUnit" =
+  print_string (dv [("x", Disc, TInt)] (Box (Var "x")));
+  [%expect {| VUnit |}]
+
+let%expect_test "deriv: fix is bot" =
+  print_string (dv [] (Fix { x = "x"; l = LPow FInt; e = Sing (Var "x") }));
+  [%expect {| (bot (LPow (FInt))) |}]
+
+let%expect_test "deriv: join is componentwise" =
+  print_string (dv [("x", Ord, TPow FInt)] (Join { e1 = Var "x"; e2 = Bot (LPow FInt) }));
+  [%expect {| (join d_x (bot (LPow (FInt)))) |}]
 
 (* --- full program --- *)
 

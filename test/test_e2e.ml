@@ -160,6 +160,22 @@ let%expect_test "e2e: let-box with computation" =
   print_string (run "let [x] = [1 + 1] in x");
   [%expect {| 2 |}]
 
+(* --- seminaive: let-box with function --- *)
+
+let%expect_test "e2e: let-box applies boxed function" =
+  print_string (run "let [f] = [fun (x : int) -> x + 1] in f 5");
+  [%expect {| 6 |}]
+
+let%expect_test "e2e: nested let-box" =
+  print_string (run "let [x] = [3] in let [y] = [x + 1] in x + y");
+  [%expect {| 7 |}]
+
+let%expect_test "e2e: fix with seminaive converges correctly" =
+  (* Adds {0}, then for each element x rebinds it via let [n] = [x] and adds {n+1} if n < 3.
+     Exercises LetBox inside a for loop inside fix; converges to {0,1,2,3}. *)
+  print_string (run "fix (s : set int) -> {0} V (for x in s do (let [n] = [x] in case (n < 3, inl (u) -> (bot : set int), inr (u) -> {n + 1})))");
+  [%expect {| {0, 1, 2, 3} |}]
+
 (* --- error cases --- *)
 
 let%expect_test "e2e: parse error" =

@@ -101,6 +101,35 @@ let%expect_test "fix: product lattice" =
        (fun v -> join v (VPair (VUnit, sing (VInt 1))))));
   [%expect {| ((), {1}) |}]
 
+(* --- seminaive_fix --- *)
+
+let%expect_test "seminaive_fix: trivial unit" =
+  print_string (value_to_string (seminaive_fix LUnit (fun _ -> VUnit) (fun _ _ -> VUnit)));
+  [%expect {| () |}]
+
+let%expect_test "seminaive_fix: constant step converges in one iteration" =
+  (* f always adds {1}; df returns empty after the first step *)
+  let result = seminaive_fix (LPow FInt)
+    (fun s -> join s (sing (VInt 1)))
+    (fun _ _ -> bot (LPow FInt))
+  in
+  print_string (value_to_string result);
+  [%expect {| {1} |}]
+
+let%expect_test "seminaive_fix: derivative propagates new elements" =
+  (* f(x) = {0} v {y+1 | y in x, y < 3}
+     df(x)(dx) = {y+1 | y in dx, y < 3}
+     Converges to {0,1,2,3} via one new element per iteration. *)
+  let succ_lt3 s =
+    for_set (LPow FInt) s (fun x -> match x with
+      | VInt y -> if y < 3 then sing (VInt (y + 1)) else bot (LPow FInt)
+      | _ -> assert false)
+  in
+  let f x   = join (sing (VInt 0)) (succ_lt3 x) in
+  let df _ dx = succ_lt3 dx in
+  print_string (value_to_string (seminaive_fix (LPow FInt) f df));
+  [%expect {| {0, 1, 2, 3} |}]
+
 (* --- for_set --- *)
 
 let%expect_test "for_set: empty set yields bot" =

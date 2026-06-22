@@ -66,6 +66,14 @@ let fix (l : lattice) (f : value -> value) : value =
   in
   loop (bot l)
 
+let seminaive_fix (l : lattice) (f : value -> value) (df : value -> value -> value) : value =
+  let rec loop x dx =
+    let x' = join x dx in
+    if Value.compare x' x = 0 then x
+    else loop x' (df x dx)
+  in
+  loop (bot l) (f (bot l))
+
 let for_set (l : lattice) (VSet v) (f : value -> value) : value =
   VSet.fold (fun x acc -> join acc (f x)) v (bot l)
 
